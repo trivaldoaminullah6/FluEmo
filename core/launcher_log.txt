@@ -1,0 +1,16 @@
+
+[07/10/2026 15:03:26] LAUNCH TRIGGERED. Args count: 12
+  arg[0] = --user-data-dir=C:\Users\MYBOOK~1\AppData\Local\Temp\flutter_tools.d8e07185\flutter_tools_chrome_device.42f3e6ff
+  arg[1] = --remote-debugging-port=55236
+  arg[2] = --disable-background-timer-throttling
+  arg[3] = --disable-extensions
+  arg[4] = --disable-popup-blocking
+  arg[5] = --bwsi
+  arg[6] = --no-first-run
+  arg[7] = --no-default-browser-check
+  arg[8] = --disable-default-apps
+  arg[9] = --disable-translate
+  arg[10] = --disable-search-engine-choice-screen
+  arg[11] = http://localhost:52693
+Final command: "C:\Program Files\Google\Chrome\Application\chrome.exe" --user-data-dir=C:\Users\MYBOOK~1\AppData\Local\Temp\flutter_tools.d8e07185\flutter_tools_chrome_device.42f3e6ff --remote-debugging-port=55236 --disable-background-timer-throttling --disable-extensions --disable-popup-blocking --bwsi --no-first-run --no-default-browser-check --disable-default-apps --disable-translate --disable-search-engine-choice-screen --app=http://localhost:52693 --window-size=446,971 --window-position=410,40 --touch-events=enabled --force-device-scale-factor=1 --user-agent="Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+Exit code: 0

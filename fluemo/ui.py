@@ -341,7 +341,7 @@ HTML_PAGE = """<!DOCTYPE html>
 
     <!-- 6. Footer -->
     <div class="footer">
-      <span>© VallDev</span>
+      <span>fluemo v__VERSION__</span>
     </div>
 
   </div>

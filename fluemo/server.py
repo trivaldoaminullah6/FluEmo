@@ -9,7 +9,7 @@ import subprocess
 import urllib.parse
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
-from . import browser, launcher, paths
+from . import __version__, browser, launcher, paths
 from .ui import HTML_PAGE
 
 IS_WINDOWS = sys.platform == "win32"
@@ -511,7 +511,9 @@ class RequestHandler(BaseHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         if parsed.path == "/" or parsed.path == "/index.html":
             payload = json.dumps(state).replace("<", "\\u003c").replace("&", "\\u0026")
-            page = HTML_PAGE.replace("__STATE_JSON__", payload, 1).encode("utf-8")
+            page = HTML_PAGE.replace("__STATE_JSON__", payload, 1).replace(
+                "__VERSION__", __version__, 1
+            ).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(page)))

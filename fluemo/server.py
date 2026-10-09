@@ -370,6 +370,34 @@ def run_flutter_background():
         cached_flutter_hwnd = None
         state["status"] = "idle"
 
+def _kill_flutter_tree(pid):
+    """Bunuh flutter run beserta anak-anaknya (dart, launcher, Chrome)."""
+    if IS_WINDOWS:
+        # Membunuh pohon proses.
+        try:
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(pid)],
+                capture_output=True,
+            )
+        except Exception:
+            pass
+        return
+    # flutter run + launcher hidup di process group sendiri
+    # (start_new_session=True), jadi aman dimatikan sekaligus.
+    try:
+        pgid = os.getpgid(pid)
+    except Exception:
+        return
+    if pgid == os.getpgid(0):
+        return
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        try:
+            os.killpg(pgid, sig)
+        except Exception:
+            pass
+        time.sleep(0.7)
+
+
 def stop_flutter_process():
     global flutter_proc, cached_flutter_hwnd
     add_log("Menghentikan aplikasi...")
@@ -386,31 +414,7 @@ def stop_flutter_process():
 
         def force_cleanup():
             time.sleep(0.3)
-            if IS_WINDOWS:
-                # Membunuh pohon proses (flutter, dart, launcher, chrome).
-                try:
-                    subprocess.run(
-                        ["taskkill", "/F", "/T", "/PID", str(pid)],
-                        capture_output=True,
-                    )
-                except Exception:
-                    pass
-                return
-            # flutter run + Chrome launcher hidup di process group sendiri
-            # (start_new_session=True), jadi aman dimatikan sekaligus.
-            try:
-                pgid = os.getpgid(pid)
-            except Exception:
-                return
-            if pgid == os.getpgid(0):
-                return
-            for sig in (signal.SIGTERM, signal.SIGKILL):
-                try:
-                    os.killpg(pgid, sig)
-                except Exception:
-                    pass
-                time.sleep(0.7)
-            return
+            _kill_flutter_tree(pid)
 
         threading.Thread(target=force_cleanup, daemon=True).start()
         flutter_proc = None
@@ -428,7 +432,6 @@ def stop_flutter_process():
     add_log("Aplikasi dimatikan.")
 
 def trigger_hot_reload():
-    global flutter_proc
     state["status"] = "reload"
     add_log("Hot Reload (r)...")
 
@@ -446,7 +449,6 @@ def trigger_hot_reload():
     threading.Thread(target=revert, daemon=True).start()
 
 def trigger_hot_restart():
-    global flutter_proc
     state["status"] = "restart"
     add_log("Hot Restart (R)...")
 
@@ -661,12 +663,17 @@ def shutdown_everything():
     if _shutting_down:
         return
     _shutting_down = True
-    try:
-        stop_flutter_process()
-    except Exception:
-        pass
+
+    pid = flutter_proc.pid if flutter_proc else None
     _close_controller_windows()
     _remove_server_state()
+    if pid:
+        # Bunuh sebelum keluar: os._exit() menghentikan thread pendamping
+        # `force_cleanup()` tanpa memberinya kesempatan jalan.
+        try:
+            _kill_flutter_tree(pid)
+        except Exception:
+            pass
     os._exit(0)
 
 

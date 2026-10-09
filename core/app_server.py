@@ -2,37 +2,84 @@ import os
 import sys
 import time
 import json
+import shutil
+import signal
 import threading
 import subprocess
 import urllib.parse
 from http.server import HTTPServer, BaseHTTPRequestHandler
-import ctypes
-from ctypes import wintypes
-import tkinter as tk
-from tkinter import filedialog
 
-# DPI Awareness
-try:
-    ctypes.windll.shcore.SetProcessDpiAwareness(2)
-except Exception:
-    pass
+IS_WINDOWS = sys.platform == "win32"
 
-user32 = ctypes.windll.user32
-kernel32 = ctypes.windll.kernel32
+if IS_WINDOWS:
+    import ctypes
+    from ctypes import wintypes
 
-PORT = 7890
+    # DPI Awareness
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)
+    except Exception:
+        pass
+
+    user32 = ctypes.windll.user32
+    kernel32 = ctypes.windll.kernel32
+else:
+    import ctypes
+
+    ctypes.windll = None  # type: ignore[attr-defined]
+
+    class _Unavailable:
+        """Stub agar pemanggilan API Windows di Linux tidak melempar AttributeError."""
+
+        def __getattr__(self, name):
+            def _noop(*_args, **_kwargs):
+                return 0
+
+            return _noop
+
+    user32 = _Unavailable()
+    kernel32 = _Unavailable()
+
+PORT = int(os.environ.get("FLUEMO_PORT", "7890"))
 CORE_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(CORE_DIR)
-LAUNCHER_EXE = os.path.join(CORE_DIR, "chrome_mobile_launcher.exe")
 
-# Penyimpanan profil & konfigurasi di C:
-C_HOME = os.environ.get("USERPROFILE", "C:\\Users\\Default")
-C_STORAGE_DIR = os.path.join(C_HOME, ".flutter_mobile_studio")
+# Penyimpanan profil & konfigurasi (Windows: %USERPROFILE%, Linux: $HOME)
+STORAGE_HOME = os.environ.get("USERPROFILE") or os.path.expanduser("~")
+C_STORAGE_DIR = os.path.join(STORAGE_HOME, ".flutter_mobile_studio")
 CHROME_PROFILE_DIR = os.path.join(C_STORAGE_DIR, "controller_profile")
 os.makedirs(CHROME_PROFILE_DIR, exist_ok=True)
 CONFIG_FILE = os.path.join(C_STORAGE_DIR, "config.json")
 
-def find_flutter_bat():
+CHROME_CANDIDATES = (
+    ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser"]
+    if not IS_WINDOWS
+    else [
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+    ]
+)
+FLATPAK_CHROME_IDS = ["org.chromium.Chromium", "com.google.Chrome"]
+
+
+def find_chrome_command():
+    """Kembalikan list argumen untuk menjalankan Chrome/Chromium, atau None bila tidak ada."""
+    for candidate in CHROME_CANDIDATES:
+        path = shutil.which(candidate) or (candidate if os.path.exists(candidate) else None)
+        if path:
+            return [path]
+    if not IS_WINDOWS and shutil.which("flatpak"):
+        for app_id in FLATPAK_CHROME_IDS:
+            for scope in (["--user"], []):
+                res = subprocess.run(
+                    ["flatpak", "info", *scope, app_id], capture_output=True, text=True
+                )
+                if res.returncode == 0:
+                    return ["flatpak", "run", *scope, app_id]
+    return None
+
+
+def find_flutter_executable():
     candidates = [
         r"F:\flutter\bin\flutter.bat",
         r"C:\flutter\bin\flutter.bat",
@@ -40,34 +87,89 @@ def find_flutter_bat():
     for c in candidates:
         if os.path.exists(c):
             return c
-    try:
-        res = subprocess.run("where flutter.bat", capture_output=True, text=True, shell=True)
-        lines = res.stdout.strip().splitlines()
-        if lines and os.path.exists(lines[0].strip()):
-            return lines[0].strip()
-    except Exception:
-        pass
-    return "flutter.bat"
 
-FLUTTER_BAT = find_flutter_bat()
+    if IS_WINDOWS:
+        try:
+            res = subprocess.run("where flutter.bat", capture_output=True, text=True, shell=True)
+            lines = res.stdout.strip().splitlines()
+            if lines and os.path.exists(lines[0].strip()):
+                return lines[0].strip()
+        except Exception:
+            pass
+        return "flutter.bat"
+
+    found = shutil.which("flutter")
+    if found:
+        return found
+    for c in (
+        os.path.expanduser("~/development/flutter/bin/flutter"),
+        os.path.expanduser("~/flutter/bin/flutter"),
+        "/opt/flutter/bin/flutter",
+        "/usr/local/flutter/bin/flutter",
+    ):
+        if os.path.exists(c):
+            return c
+    return "flutter"
+
+
+FLUTTER_BAT = find_flutter_executable()
+LAUNCHER_EXE = os.path.join(
+    CORE_DIR, "chrome_mobile_launcher.exe" if IS_WINDOWS else "chrome_mobile_launcher.sh"
+)
+
+# ---------------------------------------------------------------- X11 (Linux)
+# Di Linux, pencarian & pemindahan jendela memakai libX11 via ctypes (lihat x11_window.py).
+# Tidak ada dependensi pip, murni pustaka sistem.
+import x11_window as x11_window
+
+
+def _linux_controller_xid():
+    return x11_window.find_controller()
+
+
+def _linux_find_window():
+    """Padanan find_flutter_chrome_hwnd() untuk Linux."""
+    return x11_window.find_mobile_window(
+        controller_xid=_linux_controller_xid(), exclude=_mobile_window_baseline
+    )
+
+
+def _linux_snapshot_mobile_windows():
+    """Catat jendela mobile yang sudah ada agar peluncuran berikutnya tak salah sasaran."""
+    return x11_window.list_mobile_windows(controller_xid=_linux_controller_xid())
+
+
+def _linux_resize_window(xid, w, h, x, y):
+    return x11_window.resize(xid, w, h, x, y)
+
+
+def _linux_close_window(xid):
+    return x11_window.close(xid)
+
+
+def _linux_window_alive(xid):
+    return bool(x11_window.window_info(xid)[0])
+
 
 # State Aplikasi
 state = {
     "project_path": "",
+    "project_error": "",
     "status": "idle", # "idle", "starting", "running", "reload", "restart"
     "active_preset": "mobile1",
     "presets": {
-        "mobile1": {"name": "iPhone 15 Pro", "sub": "430 × 932",   "w": 430, "h": 932},
-        "mobile2": {"name": "Pixel 8 Pro",    "sub": "440 × 960",   "w": 440, "h": 960},
-        "tab1":    {"name": "iPad Mini",     "sub": "800 × 1080",  "w": 800, "h": 1080},
-        "tab2":    {"name": "iPad Air",      "sub": "920 × 1240",  "w": 920, "h": 1240},
+        "mobile1": {"name": "iPhone 15 Pro Max", "w": 430, "h": 932},
+        "mobile2": {"name": "Pixel 8 Pro",       "w": 448, "h": 998},
+        "tab1":    {"name": "iPad mini (A17)",   "w": 744, "h": 1133},
+        "tab2":    {"name": 'iPad Air 11"',      "w": 820, "h": 1180},
     },
-    "logs": ["Siap digunakan."]
+    "logs": []
 }
 
 flutter_proc = None
 controller_hwnd = None
 cached_flutter_hwnd = None
+_mobile_window_baseline = frozenset()
 
 def load_saved_config():
     if os.path.exists(CONFIG_FILE):
@@ -91,6 +193,21 @@ def save_config():
     except Exception:
         pass
 
+def validate_project_dir(path):
+    """Simpan path apa adanya di project_path, isi project_error bila tidak valid. True bila valid."""
+    state["project_path"] = path or ""
+    if not path:
+        state["project_error"] = "Belum ada folder proyek dipilih."
+        return False
+    if not os.path.isdir(path):
+        state["project_error"] = f"Folder tidak ditemukan: {path}"
+        return False
+    if not os.path.exists(os.path.join(path, "pubspec.yaml")):
+        state["project_error"] = "Folder ini tidak punya pubspec.yaml. Pilih folder proyek Flutter."
+        return False
+    state["project_error"] = ""
+    return True
+
 def add_log(msg):
     line = f"[{time.strftime('%H:%M:%S')}] {msg}"
     state["logs"].append(line)
@@ -110,6 +227,11 @@ def update_mobile_config(w, h):
 
 def find_flutter_chrome_hwnd():
     global cached_flutter_hwnd
+
+    if not IS_WINDOWS:
+        if cached_flutter_hwnd and _linux_window_alive(cached_flutter_hwnd):
+            return cached_flutter_hwnd
+        return _linux_find_window()
 
     # Cek cache validitas jendela sebelumnya untuk hemat CPU
     if cached_flutter_hwnd and user32.IsWindow(cached_flutter_hwnd) and user32.IsWindowVisible(cached_flutter_hwnd):
@@ -164,11 +286,14 @@ def resize_flutter_chrome(preset_id):
 
     hwnd = find_flutter_chrome_hwnd()
     if hwnd:
-        SWP_NOZORDER = 0x0004
-        SWP_NOACTIVATE = 0x0010
         total_w = preset["w"] + 16
         total_h = preset["h"] + 39
-        user32.SetWindowPos(hwnd, 0, 410, 40, total_w, total_h, SWP_NOZORDER | SWP_NOACTIVATE)
+        if IS_WINDOWS:
+            SWP_NOZORDER = 0x0004
+            SWP_NOACTIVATE = 0x0010
+            user32.SetWindowPos(hwnd, 0, 410, 40, total_w, total_h, SWP_NOZORDER | SWP_NOACTIVATE)
+        else:
+            _linux_resize_window(hwnd, total_w, total_h, 410, 40)
         add_log(f"Ukuran: {preset['name']} ({preset['w']}×{preset['h']})")
         return True
     else:
@@ -176,7 +301,7 @@ def resize_flutter_chrome(preset_id):
         return False
 
 def run_flutter_background():
-    global flutter_proc, cached_flutter_hwnd
+    global flutter_proc, cached_flutter_hwnd, _mobile_window_baseline
     project = state["project_path"]
     if not project or not os.path.exists(os.path.join(project, "pubspec.yaml")):
         state["status"] = "idle"
@@ -185,6 +310,10 @@ def run_flutter_background():
 
     p = state["presets"][state["active_preset"]]
     update_mobile_config(p["w"], p["h"])
+
+    if not IS_WINDOWS:
+        # Jendela app yang sudah terbuka bukan milik peluncuran ini.
+        _mobile_window_baseline = frozenset(_linux_snapshot_mobile_windows())
 
     env = os.environ.copy()
     env["CHROME_EXECUTABLE"] = LAUNCHER_EXE
@@ -209,8 +338,12 @@ def run_flutter_background():
     threading.Thread(target=window_watchdog, daemon=True).start()
 
     try:
-        cmd = ["cmd.exe", "/c", FLUTTER_BAT, "run", "-d", "chrome"]
-        flutter_proc = subprocess.Popen(
+        cmd = (
+            ["cmd.exe", "/c", FLUTTER_BAT, "run", "-d", "chrome"]
+            if IS_WINDOWS
+            else [FLUTTER_BAT, "run", "-d", "chrome"]
+        )
+        proc = subprocess.Popen(
             cmd,
             cwd=project,
             env=env,
@@ -218,10 +351,12 @@ def run_flutter_background():
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
-            bufsize=1
+            bufsize=1,
+            start_new_session=not IS_WINDOWS,
         )
+        flutter_proc = proc
 
-        for line in flutter_proc.stdout:
+        for line in proc.stdout:
             l = line.strip()
             if l:
                 add_log(l)
@@ -249,7 +384,7 @@ def run_flutter_background():
                 elif "restarted application" in lower_l or "hot restart" in lower_l:
                     state["status"] = "running"
 
-        flutter_proc.wait()
+        proc.wait()
         add_log("Flutter berhenti.")
     except Exception as e:
         add_log(f"Error: {e}")
@@ -274,6 +409,22 @@ def stop_flutter_process():
 
         def force_cleanup():
             time.sleep(0.3)
+            if not IS_WINDOWS:
+                # flutter run + Chrome launcher hidup di process group sendiri
+                # (start_new_session=True), jadi aman dimatikan sekaligus.
+                try:
+                    pgid = os.getpgid(pid)
+                except Exception:
+                    return
+                if pgid == os.getpgid(0):
+                    return
+                for sig in (signal.SIGTERM, signal.SIGKILL):
+                    try:
+                        os.killpg(pgid, sig)
+                    except Exception:
+                        pass
+                    time.sleep(0.7)
+                return
             try:
                 subprocess.run(f"taskkill /F /T /PID {pid}", shell=True, capture_output=True)
             except Exception:
@@ -292,17 +443,20 @@ def stop_flutter_process():
 
     hwnd = find_flutter_chrome_hwnd()
     if hwnd:
-        try:
-            user32.PostMessageW(hwnd, 0x0010, 0, 0) # WM_CLOSE
-        except Exception:
-            pass
+        if IS_WINDOWS:
+            try:
+                user32.PostMessageW(hwnd, 0x0010, 0, 0) # WM_CLOSE
+            except Exception:
+                pass
+        else:
+            _linux_close_window(hwnd)
     cached_flutter_hwnd = None
     add_log("Aplikasi dimatikan.")
 
 def trigger_hot_reload():
     global flutter_proc
     state["status"] = "reload"
-    add_log("⚡ Hot Reload (r)...")
+    add_log("Hot Reload (r)...")
 
     if flutter_proc and flutter_proc.stdin:
         try:
@@ -320,7 +474,7 @@ def trigger_hot_reload():
 def trigger_hot_restart():
     global flutter_proc
     state["status"] = "restart"
-    add_log("🔄 Hot Restart (R)...")
+    add_log("Hot Restart (R)...")
 
     if flutter_proc and flutter_proc.stdin:
         try:
@@ -336,16 +490,37 @@ def trigger_hot_restart():
     threading.Thread(target=revert, daemon=True).start()
 
 def pick_folder_dialog():
-    root = tk.Tk()
-    root.withdraw()
-    root.attributes("-topmost", True)
-    folder = filedialog.askdirectory(title="Pilih Folder Flutter", initialdir=state["project_path"] or "C:\\")
-    root.destroy()
-    if folder and os.path.exists(os.path.join(folder, "pubspec.yaml")):
-        state["project_path"] = folder
+    initial = state["project_path"] or (os.path.expanduser("~") if not IS_WINDOWS else "C:\\")
+    folder = None
+    if IS_WINDOWS:
+        import tkinter as tk
+        from tkinter import filedialog
+
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        folder = filedialog.askdirectory(title="Pilih Folder Flutter", initialdir=initial)
+        root.destroy()
+    else:
+        for dialog in (
+            ["zenity", "--file-selection", "--directory", "--title=Pilih Folder Flutter",
+             f"--filename={initial}/"],
+            ["kdialog", "--getexistingdirectory", initial],
+        ):
+            if not shutil.which(dialog[0]):
+                continue
+            res = subprocess.run(dialog, capture_output=True, text=True)
+            if res.returncode == 0 and res.stdout.strip():
+                folder = res.stdout.strip()
+                break
+            return None
+    if not folder:
+        return None
+    if validate_project_dir(folder):
         save_config()
         add_log(f"Proyek: {os.path.basename(folder)}")
         return folder
+    add_log(state["project_error"])
     return None
 
 # ULTRA-RINGAN: Pure embedded CSS & inline SVG. 0 network request, 100% offline, < 15MB RAM!
@@ -866,19 +1041,29 @@ class RequestHandler(BaseHTTPRequestHandler):
 
         elif parsed.path == "/api/set_path":
             manual_path = params.get("path", [""])[0]
-            if manual_path and os.path.exists(manual_path):
-                state["project_path"] = manual_path
+            if validate_project_dir(manual_path):
                 add_log(f"Path: {os.path.basename(manual_path)}")
             self.send_response(200)
             self.end_headers()
             self.wfile.write(b'{"status":"ok"}')
 
         elif parsed.path == "/api/start":
-            if state["status"] == "idle":
+            if state["project_error"] or not validate_project_dir(state["project_path"]):
+                body = json.dumps({"status": "error", "error": state["project_error"]}).encode("utf-8")
+                self.send_response(409)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            elif state["status"] == "idle":
                 threading.Thread(target=run_flutter_background, daemon=True).start()
-            self.send_response(200)
-            self.end_headers()
-            self.wfile.write(b'{"status":"ok"}')
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b'{"status":"ok"}')
+            else:
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b'{"status":"busy"}')
 
         elif parsed.path == "/api/stop":
             stop_flutter_process()
@@ -947,23 +1132,40 @@ def write_initial_chrome_preferences():
 
 def launch_controller_window():
     global controller_hwnd
-    chrome_path = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
     url = f"http://127.0.0.1:{PORT}"
 
     write_initial_chrome_preferences()
 
+    chrome_cmd = find_chrome_command()
+    if not chrome_cmd:
+        add_log("Chrome/Chromium tidak ditemukan. Buka manual: " + url)
+        print(f"Chrome/Chromium tidak ditemukan. Buka manual: {url}")
+        return
+
     cmd = [
-        chrome_path,
+        *chrome_cmd,
         f"--user-data-dir={CHROME_PROFILE_DIR}",
         f"--app={url}",
+        f"--class={x11_window.CONTROLLER_WM_CLASS}",
         "--window-size=360,740",
         "--window-position=30,40",
         "--no-first-run",
-        "--no-default-browser-check"
+        "--no-default-browser-check",
     ]
+    if not IS_WINDOWS:
+        # Paksa X11 (via Xwayland) agar ukuran/posisi jendela bisa diatur.
+        cmd.append("--ozone-platform=x11")
     subprocess.Popen(cmd)
 
     time.sleep(1)
+    if not IS_WINDOWS:
+        for _ in range(20):
+            controller_hwnd = _linux_controller_xid()
+            if controller_hwnd:
+                return
+            time.sleep(0.5)
+        return
+
     def enum_cb(h, lp):
         if user32.IsWindowVisible(h):
             length = user32.GetWindowTextLengthW(h)

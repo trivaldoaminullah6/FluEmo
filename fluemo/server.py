@@ -320,6 +320,10 @@ def run_flutter_background():
             if IS_WINDOWS
             else [FLUTTER_BAT, "run", "-d", "chrome"]
         )
+        popen_kwargs = {}
+        if not IS_WINDOWS:
+            # Process group sendiri supaya killpg mematikan flutter + anak-anaknya.
+            popen_kwargs["start_new_session"] = True
         proc = subprocess.Popen(
             cmd,
             cwd=project,
@@ -329,7 +333,7 @@ def run_flutter_background():
             stderr=subprocess.STDOUT,
             text=True,
             bufsize=1,
-            start_new_session=not IS_WINDOWS,
+            **popen_kwargs,
         )
         flutter_proc = proc
 

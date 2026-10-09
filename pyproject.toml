@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fluemo"
+dynamic = ["version"]
+description = "Runner Flutter web super ringan: pratinjau aplikasi Flutter di jendela Chrome seukuran ponsel, tanpa emulator."
+readme = "README.md"
+requires-python = ">=3.8"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "DANANGG28", email = "danangaja3003@gmail.com" }]
+keywords = ["flutter", "web", "chrome", "runner", "preview", "hot-reload", "emulator"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Operating System :: MacOS",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Topic :: Software Development :: Build Tools",
+  "Topic :: Software Development :: Testing",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/DANANGG28/FluEmo"
+Repository = "https://github.com/DANANGG28/FluEmo"
+Issues = "https://github.com/DANANGG28/FluEmo/issues"
+
+[project.scripts]
+fluemo = "fluemo.cli:main"
+fluemo-launcher = "fluemo.launcher:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "fluemo.__version__" }
+
+[tool.setuptools.packages.find]
+include = ["fluemo*"]

@@ -1,63 +1,125 @@
-# Flutter Mobile Studio (Runner Ringan Pengganti Emulator)
+# fluemo
 
-Aplikasi desktop controller ultra-ringan untuk menjalankan proyek Flutter langsung ke Google Chrome dengan format tampilan smartphone/tablet tanpa menggunakan emulator Android yang berat.
+Runner Flutter web super ringan: pratinjau aplikasi Flutter di jendela Chrome **seukuran ponsel**, tanpa emulator dan tanpa Android Studio.
 
-## Keunggulan & Optimasi
-- **RAM < 200 MB** (Emulator Android biasa memakan 4–8 GB RAM).
-- **0% CPU saat idle** dengan pemuatan style murni tanpa dependensi compiler eksternal.
-- **100% Offline Ready** (Tanpa CDN eksternal, aset SVG tertanam).
-- **Dukungan Hot Reload (`r`) dan Hot Restart (`R`)** secara instan.
-- **Ukuran Layar Lega**: Pilihan preset iPhone 15 Pro Max, Pixel 8 Pro, iPad mini (A17), iPad Air 11".
+Satu perintah, tanpa konfigurasi:
 
-## Struktur Folder
-```text
-FluEmo/
-├── Buka_Controller.bat        <-- Shortcut Windows
-├── Buka_Controller.sh         <-- Shortcut Linux/macOS
-├── README.md                  <-- Dokumentasi proyek
-└── core/                      <-- Mesin inti aplikasi
-    ├── app_server.py          <-- Server backend & GUI Controller
-    ├── chrome_mobile_launcher.exe <-- Launcher Windows (interceptor ukuran layar)
-    ├── ChromeMobileLauncher.cs    <-- Source code C# launcher Windows
-    ├── chrome_mobile_launcher.sh  <-- Launcher Linux (padanan .exe)
-    ├── x11_window.py          <-- Kontrol jendela X11 (Linux)
-    └── mobile_config.txt      <-- Konfigurasi koordinat jendela
+```bash
+pip install fluemo
+cd proyek-flutter-ku
+fluemo
 ```
 
-## Cara Menjalankan (Windows)
-1. Klik ganda pada `Buka_Controller.bat`.
-2. Klik tombol **Pilih** atau ketik path folder proyek Flutter Anda.
-3. Klik **Jalankan** untuk memulai Flutter.
-4. Gunakan tombol **Muat ulang (r)**, **Mulai ulang (R)**, dan **Matikan** sesuai kebutuhan.
-5. Klik preset ukuran layar untuk mengubah ukuran jendela pengujian secara langsung.
+`fluemo` mendeteksi proyek Flutter di folder saat ini, menjalankan `flutter run -d chrome` di latar belakang, membuka jendela controller, dan langsung mengembalikan terminal ke Anda.
 
-## Cara Menjalankan (Linux / Fedora)
-1. Pastikan `flutter` ada di `PATH`:
-   ```bash
-   export PATH="$HOME/development/flutter/bin:$PATH"
-   flutter --version
-   ```
-2. Pasang Chrome/Chromium (pilih salah satu):
-   ```bash
-   # Chromium dari Flathub (tanpa sudo)
-   flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-   flatpak install --user flathub org.chromium.Chromium
+## Instalasi (global, sekali per mesin)
 
-   # atau via dnf (butuh sudo, aktifkan repo RPM Fusion bila belum):
-   sudo dnf install chromium
-   ```
-3. Pasang `zenity` untuk dialog pemilihan folder (opsional; tombol **Pilih**):
-   ```bash
-   sudo dnf install zenity
-   ```
-4. Jalankan controller:
-   ```bash
-   ./Buka_Controller.sh
-   ```
-   Controller terbuka di jendela Chrome mode `--app` pada `http://127.0.0.1:7890`.
+`fluemo` dipasang **sekali per mesin**, bukan per proyek. Setelah itu Anda bisa memakainya dari folder proyek Flutter mana pun.
 
-### Catatan Linux
-- Ukuran/posisi jendela diatur lewat libX11. Chrome/Chromium dipaksa jalan sebagai klien X11 (via Xwayland) supaya `--window-size` dan resize preset benar-benar berlaku.
-- Cara lain: jalankan sesi Xorg dari layar login bila ingin X11 native.
-- Preset mengubah ukuran jendela app yang **baru diluncurkan** controller ini; jendela `flutter run` lain tidak diganggu.
-- Gratis dependensi Python tambahan: hanya `python3` standard library.
+### Disarankan: pipx
+
+```bash
+pipx install fluemo
+```
+
+pipx memasang `fluemo` di lingkungan terisolasi miliknya dan menaruh executable di `~/.local/bin` (Linux/macOS) atau `%USERPROFILE%\.local\bin` (Windows). Cara ini tidak menyentuh Python sistem, jadi aman dari konflik paket dan dari proteksi PEP 668.
+
+### Alternatif: pip
+
+```bash
+pip install --user fluemo      # Linux/macOS
+py -m pip install --user fluemo   # Windows
+```
+
+Pastikan direktori script Python ada di `PATH`. Di Windows, centang **"Add Python to PATH"** saat memasang Python.
+
+**Jangan** memasang `fluemo` di dalam virtualenv milik satu proyek: instalasi jadi terkurung di proyek itu dan tidak bisa dipanggil dari folder proyek lain. Bila terminal menolak `pip install fluemo` dengan `error: externally-managed-environment`, gunakan pipx atau tambahkan `--user`.
+
+Cek hasilnya:
+
+```bash
+fluemo --version
+```
+
+### Syarat
+
+- **Python 3.8+**
+- **Flutter SDK** di `PATH` (`flutter --version` harus jalan)
+- **Chrome atau Chromium**
+  - Linux: `flatpak install --user flathub org.chromium.Chromium` atau `sudo dnf install chromium`
+  - Windows: Chrome dari google.com, atau `winget install Google.Chrome`
+- **zenity** (opsional, Linux) untuk dialog pemilih folder
+
+## Pemakaian
+
+```bash
+cd proyek-flutter-ku
+fluemo
+```
+
+Yang terjadi:
+
+1. `fluemo` mencari `pubspec.yaml` di folder saat ini, lalu naik maksimum 5 level ke atas.
+2. Server berjalan di latar belakang — terminal Anda langsung bebas, tetap bisa dipakai untuk perintah lain.
+3. Jendela controller terbuka dengan tombol **Jalankan**, **Matikan**, **Muat ulang**, **Mulai ulang**, dan pemilih ukuran layar.
+4. Aplikasi Flutter muncul di jendela Chrome terpisah yang dikunci seukuran perangkat pilihan (mis. iPhone 15 Pro Max atau iPad mini).
+
+Stop semuanya dengan salah satu cara:
+
+- klik **Keluar** di jendela controller, atau
+- tutup jendela controller seperti jendela biasa — server ikut mati sendiri.
+
+Keduanya mematikan `flutter run`, jendela aplikasi, jendela controller, dan server sekaligus.
+
+Menjalankan `fluemo` lagi saat server masih hidup tidak memulai server kedua: perintah itu memakai instance yang sudah berjalan. Bila proyek di folder baru belum berjalan, proyek itu yang dijalankan; bila proyek lain sedang berjalan, proyek itu dibiarkan dan Anda diarahkan ke jendela controller yang ada.
+
+## Keunggulan & Optimasi
+
+- **Nol dependensi pip** — hanya standard library Python.
+- **Satu implementasi launcher** untuk Linux, macOS, dan Windows.
+- **Ringan** — UI controller adalah satu halaman HTML dengan CSS dan SVG inline: tanpa permintaan jaringan, tanpa framework.
+- **Hot reload dan hot restart** diteruskan ke `flutter run` dari jendela controller.
+- **Ukuran jendela presisi** — launcher menjalankan Chrome dalam mode aplikasi (`--app`) sehingga ukuran jendela sama dengan ukuran konten perangkat, bukan ukuran jendela ber-chrome.
+
+## Struktur folder
+
+```
+fluemo/
+  __init__.py      <-- versi paket
+  __main__.py      <-- entry point `python -m fluemo`
+  cli.py           <-- perintah `fluemo`: deteksi proyek, spawn/reuse server
+  server.py        <-- server HTTP + API, pengelola proses flutter, jendela controller
+  ui.py            <-- halaman controller (HTML + CSS + JS inline)
+  launcher.py      <-- entry point `fluemo-launcher`; ukuran & posisi jendela ponsel
+  browser.py       <-- pencarian Chrome/Chromium
+  paths.py         <-- lokasi file runtime di ~/.fluemo
+  x11_window.py    <-- kendali jendela X11 via ctypes (khusus Linux)
+pyproject.toml
+LICENSE
+README.md
+```
+
+File runtime disimpan di `~/.fluemo/`: `config.json` (preset terakhir), `mobile_config.txt` (ukuran jendela aktif), `server.json` (pid & port server), `server.log`, `launcher_log.txt`, dan profil Chrome khusus controller.
+
+## Pengembangan
+
+```bash
+python -m venv .venv
+.venv/bin/pip install -e .          # Linux/macOS
+.venv\Scripts\pip install -e .      # Windows
+.venv/bin/fluemo --version
+```
+
+## Publikasi
+
+```bash
+python -m build
+twine check dist/*
+twine upload dist/*
+```
+
+`twine upload` membutuhkan token PyPI.
+
+## Lisensi
+
+MIT — lihat [LICENSE](LICENSE).
